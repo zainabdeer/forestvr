@@ -188,20 +188,37 @@ function parts(txt){ // تقسيم النص إلى جمل قصيرة حتى لا
     const out=[];(txt.match(/[^.!؟?:]+[.!؟?:]*/g)||[txt]).forEach(s=>{s=s.trim();if(!s)return;
         while(s.length>140){let k=s.lastIndexOf('،',140);if(k<40)k=s.lastIndexOf(' ',140);out.push(s.slice(0,k+1));s=s.slice(k+1).trim()}
         if(s)out.push(s)});return out}
+const WELCOME='أهلاً بك في الغابة! اضغط على الشاشة للمشي، واضغط مرة أخرى للتوقف. ابحث عن الحيوانات الأربعة، وثبّت الدائرة عليها لتسمع قصتها.';
+const SPOKEN={};
+/* تسجيلات صوتية جاهزة بالفصحى (تُستخدم قبل صوت الجهاز) */
+const VO={welcome:'audio/welcome.mp3',wood:'audio/wood.mp3',monkey:'audio/monkey.mp3',bear:'audio/bear.mp3',lion:'audio/lion.mp3',win:'audio/win.mp3'};
+let voBuf={},voGain=null,voSrc=null;
+function clipKey(txt){if(txt===WELCOME)return'welcome';if(txt===WIN.t)return'win';for(const k in A)if(A[k].t===txt)return k;return null}
+async function voBuffer(k){if(voBuf[k])return voBuf[k];const ab=await (await fetch(VO[k])).arrayBuffer();
+    voBuf[k]=await new Promise((res,rej)=>AC.decodeAudioData(ab,res,rej));return voBuf[k]}
+function preloadVO(){if(AC)for(const k in VO)voBuffer(k).catch(()=>{})}
+function stopClip(){if(voSrc){try{voSrc.onended=null;voSrc.stop()}catch(e){}voSrc=null}}
 let sayId=0;
-function say(txt,a2,a3){const done=typeof a2==='function'?a2:typeof a3==='function'?a3:null,showSub=!(a2===false||a3===false);
-    const id=++sayId,subs=$$('.subtitle');
-    if(showSub) subs.forEach(s=>{s.textContent=txt;s.classList.add('on')});
-    let fin=false;const finish=()=>{if(fin||id!==sayId)return;fin=true;document.body.classList.remove('speaking');if(showSub)subs.forEach(s=>s.classList.remove('on'));if(done)done()};
-    if(!synth||muted||!arVoices.length){ // لا يوجد صوت عربي على الجهاز: نكتفي بالنص
-        if(synth&&!muted&&!arVoices.length&&!say.warned){say.warned=true;toast('لا يوجد صوت عربي على هذا الجهاز، سيظهر النص فقط')}
-        setTimeout(finish,txt.length*60+1000);return}
-    synth.cancel();document.body.classList.add('speaking');
-    const ps=parts(txt);
+function ttsSpeak(text,finish){
+    if(!synth||!arVoices.length){if(synth&&!say.warned){say.warned=true;toast('لا يوجد صوت عربي على هذا الجهاز، سيظهر النص فقط')}setTimeout(finish,text.length*45+1000);return}
+    synth.cancel();const ps=parts(text);
     ps.forEach((p,i)=>{const u=new SpeechSynthesisUtterance(p);u.lang=voice.lang;u.voice=voice;u.rate=.88;u.pitch=/natural|neural|online|premium|enhanced/i.test(voice.name)?1:1.12;
         if(i===ps.length-1){u.onend=finish;u.onerror=finish}synth.speak(u)});
-    setTimeout(finish,txt.length*130+5000); // أمان: إن لم يصل حدث النهاية
-    if(synth.paused)synth.resume();
+    setTimeout(finish,text.length*90+5000);if(synth.paused)synth.resume()}
+function say(txt,a2,a3){const done=typeof a2==='function'?a2:typeof a3==='function'?a3:null,showSub=!(a2===false||a3===false);
+    const id=++sayId,subs=$$('.subtitle'),k=clipKey(txt);
+    subs.forEach(s=>s.classList.remove('on'));
+    if(showSub) subs.forEach(s=>{s.textContent=txt;s.classList.add('on')});
+    let fin=false;const finish=()=>{if(fin||id!==sayId)return;fin=true;document.body.classList.remove('speaking');if(showSub)subs.forEach(s=>s.classList.remove('on'));if(done)done()};
+    stopClip();if(synth)synth.cancel();
+    if(muted){setTimeout(finish,txt.length*60+1000);return}
+    document.body.classList.add('speaking');
+    const spoken=(k&&SPOKEN[k])||txt;
+    if(k&&VO[k]&&AC){
+        voBuffer(k).then(buf=>{if(id!==sayId)return;if(!voGain){voGain=AC.createGain();voGain.gain.value=1;voGain.connect(AC.destination)}
+            const s=AC.createBufferSource();s.buffer=buf;s.connect(voGain);s.onended=finish;voSrc=s;s.start();setTimeout(finish,buf.duration*1000+1500)})
+        .catch(()=>ttsSpeak(spoken,finish));return}
+    ttsSpeak(spoken,finish);
 }
 function nextVoice(){if(!synth){toast('المتصفح لا يدعم القراءة الصوتية');return}
     pickVoice();if(!arVoices.length){toast('لا يوجد صوت عربي على هذا الجهاز');return}
@@ -548,23 +565,24 @@ if(v){try{const el=document.documentElement;(el.requestFullscreen||el.webkitRequ
 
 async function begin(v){
     try{if(typeof DeviceOrientationEvent!=='undefined'&&typeof DeviceOrientationEvent.requestPermission==='function')await DeviceOrientationEvent.requestPermission()}catch(e){}
-    if(!AC)initAudio(); AC.resume(); a0=null; yaw=0; started=true; $('#intro').style.display='none'; setVR(v); setHint();
+    if(!AC)initAudio(); AC.resume(); preloadVO(); a0=null; yaw=0; started=true; $('#intro').style.display='none'; setVR(v); setHint();
     setTimeout(()=>{
-        say('أهلاً بك في الغابة! اضغط على الشاشة للمشي، واضغط مرة أخرى للتوقف. ابحث عن الحيوانات الأربعة، وثبّت الدائرة عليها لتسمع قصتها.', true, ()=>{});
+        say(WELCOME, true, ()=>{});
     }, 900);
 }
 
 $('#go').onclick=()=>{unlockSpeech();begin(false)}; $('#goVR').onclick=()=>{unlockSpeech();begin(true)};
 $('#bVR').onclick=()=>setVR(!vr);
+if(Object.keys(VO).length>=6)$('#bVoice').style.display='none';
 $('#bVoice').onclick=()=>{unlockSpeech();nextVoice()};
-$('#bSnd').onclick=e=>{muted=!muted; e.currentTarget.textContent=muted?'🔇':'🔊'; if(master)master.gain.value=muted?0:.55; if(muted&&synth)synth.cancel()};
+$('#bSnd').onclick=e=>{muted=!muted; e.currentTarget.textContent=muted?'🔇':'🔊'; if(master)master.gain.value=muted?0:.55; if(muted){if(synth)synth.cancel();stopClip()}};
 $('#bRe').onclick=()=>{if(lastNote){unlockSpeech();setNote(lastNote); say(lastNote.t, false, ()=>{noteTimer=setTimeout(hideNote,5000)})}};
 $('#bFs').onclick=()=>{const el=document.documentElement;try{document.fullscreenElement?document.exitFullscreen():(el.requestFullscreen||el.webkitRequestFullscreen).call(el)}catch(e){}};
 $('#bRst').onclick=()=>{
     found.clear(); $$('.stars .n').forEach(e=>e.textContent=0);
     $$('.c').forEach(e=>e.classList.remove('on'));
     hideNote(); $$('.subtitle').forEach(s=>s.classList.remove('on'));
-    if(synth) synth.cancel();
+    if(synth) synth.cancel(); stopClip();
     pos.set(0, 1.6, 0); yaw = 0; pitch = 0; walking = false; setHint();
 };
 </script>
