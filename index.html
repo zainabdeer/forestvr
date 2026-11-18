@@ -48,6 +48,9 @@ canvas{position:fixed;inset:0;width:100%;height:100%;display:block}
 .small{font-size:13px!important;opacity:.8;margin-top:10px!important}
 #rot{display:none;position:fixed;inset:0;z-index:8;background:rgba(6,20,10,.92);align-items:center;justify-content:center;font-size:22px;font-weight:800;text-align:center;padding:30px}
 @media (orientation:portrait){.vr #rot{display:flex}}
+.toast{position:fixed;left:50%;bottom:calc(16px + env(safe-area-inset-bottom,0px));transform:translate(-50%,30px);opacity:0;transition:.4s;background:var(--card);border:1px solid var(--leaf);color:var(--ink);border-radius:999px;padding:7px 16px;font-size:15px;font-weight:800;z-index:12;pointer-events:none;white-space:nowrap}
+.toast.on{opacity:1;transform:translate(-50%,0)}
+.speaking .subtitle{border-color:var(--leaf)}
 </style>
 </head>
 <body>
@@ -56,18 +59,19 @@ canvas{position:fixed;inset:0;width:100%;height:100%;display:block}
     <button id="bRst" title="إعادة الجولة">🔄</button>
     <button id="bVR" title="وضع النظارة">🥽</button>
     <button id="bSnd" title="الصوت">🔊</button>
-    
+    <button id="bVoice" title="تغيير صوت القارئ">🗣️</button>
     <button id="bRe" title="أعد الملاحظة">🔁</button>
     <button id="bFs" title="ملء الشاشة">⛶</button>
 </div>
+<div class="toast" id="toast"></div>
 <div id="rot">↻ أدر هاتفك بالعرض لتظهر الغابة بعينين</div>
 <div id="intro"><div class="card">
 <h1>غابة الواقع الافتراضي</h1>
 <p>جولة بين الأشجار، وأربعة أصدقاء ينتظرون أن تكتشفهم!</p>
 <ul>
-    
     <li>👆 اضغط على الشاشة للمشي، واضغط مرة أخرى للتوقف</li>
     <li>🎯 ركّز الدائرة على حيوان ثانية واحدة لتكتشفه</li>
+    <li>🗣️ سيقرأ لك الحيوان قصته بصوت مسموع</li>
     <li>🎧 السماعات تجعل الرحلة أجمل</li>
 </ul>
 <button id="go">🌿 ابدأ الجولة</button><button id="goVR">🥽 وضع النظارة</button>
@@ -169,42 +173,40 @@ lion(){tone({type:'sawtooth',f0:140,f1:55,d:2.2,g:.5,lp:500,lfo:18,ld:.2});tone(
 bear(){tone({type:'sawtooth',f0:95,f1:60,d:1.6,g:.5,lp:380,lfo:30,ld:.25});tone({type:'square',f0:60,f1:45,d:1.5,g:.15,lp:200})}};
 
 setInterval(()=>{if(AC&&!muted&&dayF>.45&&Math.random()<.4){const b=2200+Math.random()*1800,n=2+(Math.random()*3|0);for(let i=0;i<n;i++)tone({f0:b,f1:b*(1.2+Math.random()*.5),t:i*.11,d:.09,g:.04})}},1500);
-
-let voice=null;
-const FEM=/hoda|salma|zariyah|laila|layla|amina|fatima|maha|sara|noura|google|female|هدى|سلمى|مها|ليلى/i,MALE=/hamed|hamdan|shakir|maged|majed|naayf|tarik|bassel|\bmale\b|ماجد|طارق/i;
-let arVoices=[],vi=0;
-function score(x){let s=0;if(/natural|neural|online/i.test(x.name))s+=6;if(FEM.test(x.name))s+=10;if(MALE.test(x.name))s-=20;if(/^ar-SA/i.test(x.lang))s+=2;return s}
-function pickVoice(){arVoices=speechSynthesis.getVoices().filter(x=>/^ar/i.test(x.lang)).sort((a,b)=>score(b)-score(a));voice=arVoices.length?arVoices[vi%arVoices.length]:null}
-if('speechSynthesis'in window){pickVoice();speechSynthesis.onvoiceschanged=pickVoice}
-
-// دالة النطق التي تظهر النص المنطوق كترجمة
+/* ===== القراءة الصوتية (نطق عربي من جهاز المستخدم) ===== */
+const synth=('speechSynthesis' in window)?window.speechSynthesis:null;
+let voice=null,arVoices=[],vi=0;
+try{vi=+localStorage.getItem('forestVoice')||0}catch(e){}
+const FEM=/hoda|salma|zariyah|laila|layla|amina|fatima|maha|sara|noura|mariam|google|female|هدى|سلمى|مها|ليلى/i,MALE=/hamed|hamdan|shakir|maged|majed|naayf|tarik|bassel|\bmale\b|ماجد|طارق/i;
+function score(x){let s=0;if(/natural|neural|online|premium|enhanced/i.test(x.name))s+=6;if(FEM.test(x.name))s+=10;if(MALE.test(x.name))s-=4;if(/^ar-SA/i.test(x.lang))s+=2;if(x.localService)s+=1;return s}
+function pickVoice(){if(!synth)return;arVoices=synth.getVoices().filter(x=>/^ar/i.test(x.lang)).sort((a,b)=>score(b)-score(a));voice=arVoices.length?arVoices[vi%arVoices.length]:null}
+if(synth){pickVoice();synth.onvoiceschanged=pickVoice;setTimeout(pickVoice,800);setTimeout(pickVoice,2500)}
+function toast(t){const e=$('#toast');e.textContent=t;e.classList.add('on');clearTimeout(toast.t);toast.t=setTimeout(()=>e.classList.remove('on'),2600)}
+function unlockSpeech(){ // iOS/Safari: أول نطق يجب أن يكون داخل ضغطة المستخدم
+    if(!synth)return;try{synth.cancel();const u=new SpeechSynthesisUtterance(' ');u.volume=0;u.lang='ar-SA';synth.speak(u)}catch(e){}}
+function parts(txt){ // تقسيم النص إلى جمل قصيرة حتى لا يتوقف النطق في منتصفه
+    const out=[];(txt.match(/[^.!؟?:]+[.!؟?:]*/g)||[txt]).forEach(s=>{s=s.trim();if(!s)return;
+        while(s.length>140){let k=s.lastIndexOf('،',140);if(k<40)k=s.lastIndexOf(' ',140);out.push(s.slice(0,k+1));s=s.slice(k+1).trim()}
+        if(s)out.push(s)});return out}
+let sayId=0;
 function say(txt,a2,a3){const done=typeof a2==='function'?a2:typeof a3==='function'?a3:null,showSub=!(a2===false||a3===false);
-    const subs = $$('.subtitle');
-    if(showSub) {
-        subs.forEach(s => { s.textContent = txt; s.classList.add('on'); });
-    }
-    
-    const finish = () => {
-        if(showSub) subs.forEach(s => s.classList.remove('on'));
-        if(done) done();
-    };
-
-    if(true){
-        setTimeout(finish, txt.length * 60 + 1000);
-        return;
-    }
-    
-    speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(txt);
-    u.lang=voice?voice.lang:'ar-SA'; if(voice)u.voice=voice; 
-    u.rate=.9; u.pitch=/natural|neural|online/i.test(voice?voice.name:'')?1:1.1;
-    
-    let fin=false;
-    const f=()=>{if(!fin){fin=true; finish();}};
-    u.onend=f; u.onerror=f;
-    setTimeout(f, txt.length*110+4000);
-    speechSynthesis.speak(u);
+    const id=++sayId,subs=$$('.subtitle');
+    if(showSub) subs.forEach(s=>{s.textContent=txt;s.classList.add('on')});
+    let fin=false;const finish=()=>{if(fin||id!==sayId)return;fin=true;document.body.classList.remove('speaking');if(showSub)subs.forEach(s=>s.classList.remove('on'));if(done)done()};
+    if(!synth||muted||!arVoices.length){ // لا يوجد صوت عربي على الجهاز: نكتفي بالنص
+        if(synth&&!muted&&!arVoices.length&&!say.warned){say.warned=true;toast('لا يوجد صوت عربي على هذا الجهاز، سيظهر النص فقط')}
+        setTimeout(finish,txt.length*60+1000);return}
+    synth.cancel();document.body.classList.add('speaking');
+    const ps=parts(txt);
+    ps.forEach((p,i)=>{const u=new SpeechSynthesisUtterance(p);u.lang=voice.lang;u.voice=voice;u.rate=.88;u.pitch=/natural|neural|online|premium|enhanced/i.test(voice.name)?1:1.12;
+        if(i===ps.length-1){u.onend=finish;u.onerror=finish}synth.speak(u)});
+    setTimeout(finish,txt.length*130+5000); // أمان: إن لم يصل حدث النهاية
+    if(synth.paused)synth.resume();
 }
+function nextVoice(){if(!synth){toast('المتصفح لا يدعم القراءة الصوتية');return}
+    pickVoice();if(!arVoices.length){toast('لا يوجد صوت عربي على هذا الجهاز');return}
+    vi=(vi+1)%arVoices.length;try{localStorage.setItem('forestVoice',vi)}catch(e){}voice=arVoices[vi];
+    toast('🗣️ '+voice.name.replace(/Microsoft|Google|Online|\(Natural\)|-.*$/g,'').trim());say('مرحباً! أنا صوت الغابة.',false)}
 
 const renderer=new T.WebGLRenderer({antialias:true});renderer.setPixelRatio(Math.min(devicePixelRatio,1.75));document.body.prepend(renderer.domElement);
 const scene=new T.Scene(),FOG=0x9db8a2;scene.background=new T.Color(FOG);scene.fog=new T.FogExp2(FOG,.03);
@@ -216,25 +218,46 @@ let sd=7;const rnd=()=>(sd=sd*16807%2147483647)/2147483647;
 function ctex(w,h,fn,rx,ry){const c=document.createElement('canvas');c.width=w;c.height=h;fn(c.getContext('2d'),w,h);const t=new T.CanvasTexture(c);t.wrapS=t.wrapT=T.RepeatWrapping;t.repeat.set(rx,ry);return t}
 const bark=ctex(128,256,(g,w,h)=>{g.fillStyle='#4a3a2a';g.fillRect(0,0,w,h);
 for(let i=0;i<900;i++){g.fillStyle=`rgba(${20+rnd()*40|0},${15+rnd()*30|0},10,.35)`;g.fillRect(rnd()*w,rnd()*h,1+rnd()*2,6+rnd()*20)}
-for(let i=0;i<80;i++){g.fillStyle=`rgba(${60+rnd()*30|0},${130+rnd()*50|0},${40+rnd()*30|0},.6)`;g.beginPath();g.arc(rnd()*w,h*(.2+rnd()*.8),6+rnd()*20,0,7);g.fill()}},2,3);
-const gt=ctex(256,256,(g,w,h)=>{g.fillStyle='#2b4a22';g.fillRect(0,0,w,h);
+for(let i=0;i<30;i++){g.fillStyle=`rgba(${60+rnd()*30|0},${120+rnd()*40|0},${40+rnd()*30|0},.22)`;g.beginPath();g.arc(rnd()*w,h*(.2+rnd()*.8),6+rnd()*20,0,7);g.fill()}},2,3);
+const gt=ctex(256,256,(g,w,h)=>{g.fillStyle='#355d27';g.fillRect(0,0,w,h);
 for(let i=0;i<1800;i++){const c=rnd();g.fillStyle=c<.5?'rgba(60,110,40,.5)':c<.8?'rgba(90,65,35,.5)':'rgba(30,70,25,.5)';g.beginPath();g.arc(rnd()*w,rnd()*h,1+rnd()*4,0,7);g.fill()}},40,40);
 const ground=new T.Mesh(new T.PlaneGeometry(220,220),new T.MeshLambertMaterial({map:gt}));ground.rotation.x=-Math.PI/2;scene.add(ground);
-
 const trees=[],pickables=[],barkM=new T.MeshLambertMaterial({map:bark});
-function tree(x,z,r,h){const m=new T.Mesh(new T.CylinderGeometry(r*.7,r*1.15,h,10),barkM);m.position.set(x,h/2,z);scene.add(m);trees.push({x,z,r:r*1.15});pickables.push(m)}
-const WT=[-4.5,-11],MT=[8,-8],LC=[-9,6],BC=[9,8];
-tree(WT[0],WT[1],.8,26); // شجرة نقار الخشب
-tree(MT[0],MT[1],.8,26); // شجرة القرد
-
-const keep=[[0,0,3.5],[LC[0],LC[1],6.5],[BC[0],BC[1],6.5],[WT[0],WT[1],4],[MT[0],MT[1],4]];
-for(let i=0,n=0;n<80&&i<500;i++){const a=rnd()*6.28,r=5+Math.sqrt(rnd())*45,x=Math.cos(a)*r,z=Math.sin(a)*r;if(keep.some(k=>Math.hypot(x-k[0],z-k[1])<k[2]))continue;tree(x,z,.45+rnd()*.5,26);n++}
 const d=new T.Object3D(),col=new T.Color();
+const WT=[-4.5,-11],MT=[8,-8],LC=[-9,6],BC=[9,8];
+const keep=[[0,0,3.5],[LC[0],LC[1],6.5],[BC[0],BC[1],6.5],[WT[0],WT[1],4.5],[MT[0],MT[1],5]];
 
-/* سقف الأوراق */
-const can=new T.InstancedMesh(new T.IcosahedronGeometry(1,1),new T.MeshLambertMaterial({flatShading:true,emissive:0x16300f}),380);can.frustumCulled=false;
-for(let i=0;i<380;i++){const a=rnd()*6.28,r=Math.sqrt(rnd())*58;d.position.set(Math.cos(a)*r,17+rnd()*8,Math.sin(a)*r);d.rotation.set(0,rnd()*3,0);d.scale.set(3+rnd()*4,1.6+rnd()*1.6,3+rnd()*4);d.updateMatrix();can.setMatrixAt(i,d.matrix);can.setColorAt(i,col.setHSL(.25+rnd()*.1,.55,.18+rnd()*.14))}
-scene.add(can);
+const free0=(r0,r1)=>{for(let k=0;k<30;k++){const a=rnd()*6.28,r=r0+Math.sqrt(rnd())*r1,x=Math.cos(a)*r,z=Math.sin(a)*r;if(!trees.some(q=>Math.hypot(x-q.x,z-q.z)<q.r+.8)&&!keep.some(q=>Math.hypot(x-q[0],z-q[1])<q[2]*.8))return[x,z]}return[3,3]};
+function inst0(g,m,n,fn,cfn){const o=new T.InstancedMesh(g,m,n);o.frustumCulled=false;for(let i=0;i<n;i++){fn(i);d.updateMatrix();o.setMatrixAt(i,d.matrix);if(cfn)cfn(o,i)}scene.add(o);d.rotation.set(0,0,0);return o}
+
+/* ===== الأشجار: صنوبر وأشجار مستديرة بأوراق ===== */
+const trunkG=new T.CylinderGeometry(.62,1,1,9);trunkG.translate(0,.5,0);
+const coneG=new T.ConeGeometry(1,1,9);coneG.translate(0,.5,0);
+const blobG=new T.IcosahedronGeometry(1,2);
+const TP=[];for(let i=0;i<700&&TP.length<95;i++){const a=rnd()*6.28,r=5.5+Math.sqrt(rnd())*44,x=Math.cos(a)*r,z=Math.sin(a)*r;
+    if(keep.some(k=>Math.hypot(x-k[0],z-k[1])<k[2])||TP.some(q=>Math.hypot(x-q.x,z-q.z)<2.6))continue;TP.push({x,z,pine:rnd()<.55,s:.8+rnd()*.6})}
+const NP=TP.filter(t=>t.pine).length,NR=TP.length-NP;
+const trunkI=new T.InstancedMesh(trunkG,barkM,TP.length),coneI=new T.InstancedMesh(coneG,new T.MeshLambertMaterial(),NP*4),blobI=new T.InstancedMesh(blobG,new T.MeshLambertMaterial(),NR*5);
+[trunkI,coneI,blobI].forEach(m=>m.frustumCulled=false);
+let ci=0,bi=0;
+TP.forEach((t,i)=>{const s=t.s,tr=.28*s;
+    if(t.pine){const H=(7+rnd()*5)*s;d.position.set(t.x,0,t.z);d.rotation.set(0,rnd()*6,0);d.scale.set(tr,H*.32,tr);d.updateMatrix();trunkI.setMatrixAt(i,d.matrix);
+        for(let j=0;j<4;j++){const base=H*(.2+j*.17),h=H*(.42-j*.06),r=(2.1-j*.42)*s;d.position.set(t.x,base,t.z);d.scale.set(r,h,r);d.updateMatrix();coneI.setMatrixAt(ci,d.matrix);coneI.setColorAt(ci++,col.setHSL(.31+rnd()*.05,.5,.17+j*.035+rnd()*.04))}}
+    else{const H=(3.4+rnd()*1.8)*s;d.position.set(t.x,0,t.z);d.rotation.set(0,rnd()*6,0);d.scale.set(tr*1.15,H,tr*1.15);d.updateMatrix();trunkI.setMatrixAt(i,d.matrix);
+        for(let j=0;j<5;j++){const a=j/5*6.28+rnd(),o=j===4?0:1.05*s,r=(j===4?1.9:1.35+rnd()*.4)*s;d.position.set(t.x+Math.cos(a)*o,H+(j===4?1.1*s:.25*s+rnd()*.5),t.z+Math.sin(a)*o);d.rotation.set(rnd(),rnd(),rnd());d.scale.set(r,r*.85,r);d.updateMatrix();blobI.setMatrixAt(bi,d.matrix);blobI.setColorAt(bi++,col.setHSL(.24+rnd()*.07,.55,.3+rnd()*.1))}}
+    trees.push({x:t.x,z:t.z,r:tr+.1})});
+scene.add(trunkI,coneI,blobI);pickables.push(trunkI);
+/* شجرتا نقار الخشب والقرد: جذع عريض وتاج كبير */
+function bigTree(x,z){const g=new T.Group();g.position.set(x,0,z);
+    const tk=new T.Mesh(new T.CylinderGeometry(.62,.98,9,14),barkM);tk.position.y=4.5;g.add(tk);pickables.push(tk);
+    for(let i=0;i<5;i++){const rt=new T.Mesh(new T.ConeGeometry(.28,1.4,6),barkM);const a=i/5*6.28+.3;rt.position.set(Math.cos(a)*.85,.35,Math.sin(a)*.85);rt.rotation.set(Math.sin(a)*1.1,0,-Math.cos(a)*1.1);g.add(rt)}
+    const lm=new T.MeshLambertMaterial({color:0x4f9a3a});
+    for(let i=0;i<7;i++){const b=new T.Mesh(blobG,lm.clone());const a=i/7*6.28,o=i<6?2.1:0,r=i<6?2.1+rnd()*.5:2.8;b.material.color.setHSL(.25+rnd()*.06,.55,.3+rnd()*.08);b.position.set(Math.cos(a)*o,9.2+(i<6?rnd()*.8:1.6),Math.sin(a)*o);b.scale.set(r,r*.8,r);g.add(b)}
+    scene.add(g);trees.push({x,z,r:1.05});return g}
+bigTree(WT[0],WT[1]);bigTree(MT[0],MT[1]);
+/* شجيرات */
+inst0(new T.IcosahedronGeometry(.7,1),new T.MeshLambertMaterial({}),70,i=>{const p=free0(3,44);d.position.set(p[0],.35,p[1]);d.rotation.set(0,rnd()*6,0);const s=.6+rnd()*.8;d.scale.set(s*1.3,s,s*1.3)},(m,i)=>m.setColorAt(i,col.setHSL(.27+rnd()*.06,.55,.22+rnd()*.1)));
+
 /* سراخس */
 const bg=new T.ConeGeometry(.1,1.3,3);bg.translate(0,.65,0);
 const fern=new T.InstancedMesh(bg,new T.MeshLambertMaterial(),2800);fern.frustumCulled=false;d.rotation.order='YXZ';
@@ -246,146 +269,122 @@ scene.add(fern);d.rotation.order='XYZ';
 const wg=new T.PlaneGeometry(.16,.12);wg.translate(.08,0,0);const bf=[];
 for(let i=0;i<26;i++){const g=new T.Group(),m=new T.MeshBasicMaterial({color:i%3?0x3aa7ff:0x7fd0ff,side:T.DoubleSide}),mk=s=>{const p=new T.Group(),w=new T.Mesh(wg,m);w.rotation.x=-Math.PI/2;w.scale.x=s;p.add(w);g.add(p);return p};
 const a=mk(1),b=mk(-1);scene.add(g);const ang=rnd()*6.28,rr=2+rnd()*20;bf.push({g,a,b,c:[Math.cos(ang)*rr,1+rnd()*2.5,Math.sin(ang)*rr],s:.4+rnd()*.5,p:rnd()*6,r:2+rnd()*3})}
+/* ===== الحيوانات بتصميم كرتوني ناعم ===== */
+const TM={};const tm=c=>TM[c]||(TM[c]=new T.MeshToonMaterial({color:c}));
+const mat=tm;
+function S(p,r,c,x,y,z,sx=1,sy=1,sz=1){const m=new T.Mesh(new T.SphereGeometry(r,22,16),tm(c));m.position.set(x,y,z);m.scale.set(sx,sy,sz);p.add(m);return m}
+function B(p,w,h,dp,c,x,y,z){const m=new T.Mesh(new T.BoxGeometry(w,h,dp),tm(c));m.position.set(x,y,z);p.add(m);return m}
+const UP=new T.Vector3(0,1,0);
+function limb(p,a,b,r1,r2,c,joint=true){const A=new T.Vector3(...a),Bv=new T.Vector3(...b),dir=Bv.clone().sub(A),len=dir.length();
+    const m=new T.Mesh(new T.CylinderGeometry(r2,r1,len,14),tm(c));m.position.copy(A).addScaledVector(dir,.5);m.quaternion.setFromUnitVectors(UP,dir.normalize());p.add(m);
+    if(joint){S(p,r1,c,...a)}return m}
+function tube(p,pts,r,c){const m=new T.Mesh(new T.TubeGeometry(new T.CatmullRomCurve3(pts.map(q=>new T.Vector3(...q))),24,r,8),tm(c));p.add(m);return m}
+function mkEye(p,x,y,z,r){const e=new T.Group();e.position.set(x,y,z);p.add(e);S(e,r,0xffffff,0,0,0);S(e,r*.62,0x1a120c,0,0,r*.5);S(e,r*.22,0xffffff,r*.22,r*.25,r*1.02);return e}
+function mkMouth(p,x,y,z,r,c=0x2a110a,cat=true){const m=tm(c),mk=dx=>{const t=new T.Mesh(new T.TorusGeometry(r,r*.28,6,14,Math.PI),m);t.rotation.z=Math.PI;t.position.set(x+dx,y,z);p.add(t)};if(cat){mk(-r);mk(r)}else mk(0)}
+function cheek(p,x,y,z,r){S(p,r,0xff9aa2,x,y,z,1,.6,.3)}
+function hit(g,k,r,y){const m=new T.Mesh(new T.SphereGeometry(r,8,6),new T.MeshBasicMaterial({visible:false}));m.position.y=y;m.userData.key=k;g.add(m);pickables.push(m)}
 
-const mat=c=>new T.MeshLambertMaterial({color:c,flatShading:true});
-function S(p,r,c,x,y,z,sx=1,sy=1,sz=1){const m=new T.Mesh(new T.SphereGeometry(r,12,10),mat(c));m.position.set(x,y,z);m.scale.set(sx,sy,sz);p.add(m);return m}
-function B(p,w,h,dp,c,x,y,z){const m=new T.Mesh(new T.BoxGeometry(w,h,dp),mat(c));m.position.set(x,y,z);p.add(m);return m}
-function leg(p,x,z,c,w,h){const q=new T.Group();q.position.set(x,h,z);B(q,w,h,w,c,0,-h/2,0);p.add(q);return q}
-function mkEye(p, x, y, z, r) {
-    const e = S(p, r, 0xffffff, x, y, z); // أبيض العين
-    S(e, r*0.5, 0x000000, 0, 0, r*0.8); // بؤبؤ العين
-}
-function mkMouth(p,x,y,z,r,c=0x2a110a,cat=true){const m=mat(c),mk=dx=>{const t=new T.Mesh(new T.TorusGeometry(r,r*.35,5,12,Math.PI),m);t.rotation.z=Math.PI;t.position.set(x+dx,y,z);p.add(t)};if(cat){mk(-r);mk(r);B(p,r*.35,r*.9,r*.35,c,x,y+r*.45,z)}else mk(0)}
-function hit(g,k,r,y){const m=new T.Mesh(new T.SphereGeometry(r,6,4),new T.MeshBasicMaterial({visible:false}));m.position.y=y;m.userData.key=k;g.add(m);pickables.push(m)}
-
-// 1. الأسد (ثابت وواقعي)
+// 1. الأسد
 function mkLion(){
-    const g=new T.Group(), tan=0xd9a441, dk=0x5c3a21;
-    S(g, .6, tan, 0, 1.0, 0, .85, .85, 1.5); // الجسم ملتحم ومتناسق
-    const mane = S(g, .7, dk, 0, 1.5, .6, 1.1, 1.1, 0.7); // اللبدة
-    mane.rotation.x = -0.1;
-    S(g, .5, tan, 0, 1.5, .8); // الرأس
-    S(g, .25, 0xeee8aa, 0, 1.35, 1.1, 1.2, 0.9, 1.1); // الأنف والفم
-    S(g, .08, 0x111111, 0, 1.45, 1.35); // الأنف الأسود
-    mkMouth(g,0,1.28,1.345,.08);
-    mkEye(g, -0.2, 1.6, 1.2, 0.08); mkEye(g, 0.2, 1.6, 1.2, 0.08); // الأعين
-    [-1,1].forEach(s=>S(g, .12, tan, s*.35, 1.85, .7)); // الآذان
-    
-    // الأرجل عريضة وملتحمة بالجسم باستخدام كرات للأكتاف ومكعبات للأقدام
-    S(g, .25, tan, -0.35, 0.8, 0.5, 1, 1.5, 1); S(g, .25, tan, 0.35, 0.8, 0.5, 1, 1.5, 1);
-    B(g, .25, .6, .25, tan, -0.35, 0.3, 0.5); B(g, .25, .6, .25, tan, 0.35, 0.3, 0.5);
-    S(g, .28, tan, -0.35, 0.8, -0.6, 1, 1.5, 1.2); S(g, .28, tan, 0.35, 0.8, -0.6, 1, 1.5, 1.2);
-    B(g, .25, .6, .25, tan, -0.35, 0.3, -0.6); B(g, .25, .6, .25, tan, 0.35, 0.3, -0.6);
-
-    const tl=B(g,.08,.08,1.2,tan,0,1.2,-1.2); tl.rotation.x=-0.5; // الذيل
-    S(g,.12,dk,0,0.9,-1.8); // نهاية الذيل
-    hit(g,'lion',1.6,1.2); g.scale.setScalar(1.2); scene.add(g);
-    return {g, mane};
+    const g=new T.Group(),tan=0xe6ad4f,lt=0xf6dca0,mn=0xb4621e,mn2=0x93491a;
+    S(g,.55,tan,0,1.0,-.05,.95,.82,1.45);                  // الجسم
+    S(g,.42,lt,0,.86,.2,.8,.6,1.05);                       // البطن الفاتح
+    [[-1,.48],[1,.48],[-1,-.55],[1,-.55]].forEach(([s,z])=>{limb(g,[s*.3,.95,z],[s*.3,.16,z],.17,.14,tan);S(g,.17,lt,s*.3,.11,z+.05,1.05,.6,1.25)});
+    const head=new T.Group();head.position.set(0,1.55,.82);g.add(head);
+    S(head,.62,mn2,0,0,-.18,1.12,1.12,.75);                 // اللبدة الخلفية
+    for(let i=0;i<16;i++){const a=i/16*6.283;S(head,.2,i%2?mn:mn2,Math.cos(a)*.5,Math.sin(a)*.5,-.05,1,1,.8)}
+    S(head,.4,tan,0,0,.05);                                 // الرأس
+    S(head,.22,0xfbe8bf,0,-.13,.36,1.35,.9,1);              // الخطم
+    S(head,.075,0x5a2d12,0,-.03,.56,1.5,1,1);               // الأنف
+    mkMouth(head,0,-.2,.53,.065,0x5a2d12);
+    mkEye(head,-.15,.12,.33,.075);mkEye(head,.15,.12,.33,.075);
+    cheek(head,-.26,-.08,.3,.07);cheek(head,.26,-.08,.3,.07);
+    [-1,1].forEach(s=>{S(head,.11,tan,s*.3,.33,0);S(head,.06,0xf3b38a,s*.3,.33,.06,1,1,.5)});
+    const tail=new T.Group();tail.position.set(0,1.05,-.75);g.add(tail);
+    tube(tail,[[0,0,0],[0,.15,-.35],[0,.45,-.6],[0,.75,-.65]],.045,tan);S(tail,.13,mn2,0,.8,-.63);
+    hit(g,'lion',1.6,1.2);g.scale.setScalar(1.25);scene.add(g);
+    return{g,head,tail};
 }
-
-// 2. الدب (ثابت وواضح)
+// 2. الدب
 function mkBear(){
-    const g=new T.Group(), c=0x4a2f1e;
-    S(g, .8, c, 0, 1.1, 0, .95, .95, 1.2); // الجسم
-    S(g, .5, c, 0, 1.7, .5); // الرأس
-    S(g, .25, 0x8b5a2b, 0, 1.55, .85, 1.1, 0.8, 1.1); // مقدمة الوجه
-    S(g, .08, 0x111111, 0, 1.62, 1.05); // الأنف
-    mkMouth(g,0,1.45,1.09,.07,0x1a0a05);
-    mkEye(g, -0.2, 1.85, 0.92, 0.07); mkEye(g, 0.2, 1.85, 0.92, 0.07); // الأعين
-    [-1,1].forEach(s=>S(g, .15, c, s*.35, 2.0, .4)); // الآذان
-    
-    // أرجل ممتلئة ملتحمة بالجسم
-    const lx=0.45, fz=0.5, bz=-0.5, jy=0.7, by=0.3;
-    S(g, .3, c, -lx, jy, fz, 1, 1.5, 1); S(g, .3, c, lx, jy, fz, 1, 1.5, 1);
-    B(g, .35, .6, .35, c, -lx, by, fz); B(g, .35, .6, .35, c, lx, by, fz);
-    S(g, .3, c, -lx, jy, bz, 1, 1.5, 1); S(g, .3, c, lx, jy, bz, 1, 1.5, 1);
-    B(g, .35, .6, .35, c, -lx, by, bz); B(g, .35, .6, .35, c, lx, by, bz);
-
-    hit(g,'bear',1.8,1.2); g.scale.setScalar(1.1); scene.add(g);
-    return {g};
+    const g=new T.Group(),c=0x7a4a2a,lt=0xc99a68,dk=0x5c361d;
+    S(g,.72,c,0,1.05,0,1,.9,1.3);                          // الجسم
+    S(g,.5,lt,0,.92,.42,.9,.85,.7);                         // البطن
+    [[-1,.55],[1,.55],[-1,-.55],[1,-.55]].forEach(([s,z])=>{limb(g,[s*.42,.95,z],[s*.42,.18,z],.23,.2,c);S(g,.23,dk,s*.42,.12,z+.06,1.05,.55,1.25)});
+    const head=new T.Group();head.position.set(0,1.62,.92);g.add(head);
+    S(head,.48,c,0,0,0);
+    S(head,.25,lt,0,-.12,.38,1.15,.85,1);                   // الخطم
+    S(head,.085,0x1d120b,0,-.02,.6,1.4,.9,1);               // الأنف
+    mkMouth(head,0,-.2,.6,.06,0x1d120b);
+    mkEye(head,-.17,.13,.39,.07);mkEye(head,.17,.13,.39,.07);
+    cheek(head,-.3,-.07,.32,.07);cheek(head,.3,-.07,.32,.07);
+    [-1,1].forEach(s=>{S(head,.16,c,s*.34,.38,-.05);S(head,.09,lt,s*.34,.38,.04,1,1,.5)});
+    S(g,.13,c,0,1.18,-.92);                                 // الذيل
+    hit(g,'bear',1.8,1.2);g.scale.setScalar(1.15);scene.add(g);
+    return{g,head};
 }
-
-// 3. القرد (يتدلى من غصن)
+// 3. القرد يتدلى بيد واحدة ويلوّح بالأخرى
 function mkMonkey(){
-    const g=new T.Group(), c=0x8a5a2b, f=0xe8c39a;
-    // الجسم متدلي
-    S(g, .28, c, 0, -1.0, 0, .9, 1.2, .9);
-    // الرأس في الأسفل ينظر إليك
-    const h=new T.Group(); h.position.set(0, -0.4, 0.1); g.add(h);
-    S(h, .22, c, 0, 0, 0); 
-    S(h, .18, f, 0, -0.05, .12, 1, .9, .7); // الوجه
-    mkEye(h, -0.1, 0.06, 0.28, 0.045); mkEye(h, 0.1, 0.06, 0.28, 0.045);
-    mkMouth(h,0,-.09,.236,.06,0x3a160c,false); // الأعين بارزة
-    [-1,1].forEach(s=>S(h, .08, f, s*.22, 0, 0)); // الآذان
-    
-    // الأذرع طويلة تمسك بالغصن بالأعلى (عند نقطة 0)
-    const la=B(g, .08, 1.0, .08, c, -0.22, -0.5, 0); la.rotation.z = -0.15;
-    const ra=B(g, .08, 1.0, .08, c, 0.22, -0.5, 0);  ra.rotation.z = 0.15;
-    
-    // الأرجل تتدلى للأسفل
-    S(g,.14,c,-.14,-1.2,.05,1,1.4,1);B(g,.1,.5,.1,c,-.14,-1.45,.05);S(g,.07,c,-.14,-1.72,.08,1,.8,1.4);
-    S(g,.14,c,.14,-1.2,.05,1,1.4,1);B(g,.1,.5,.1,c,.14,-1.45,.05);S(g,.07,c,.14,-1.72,.08,1,.8,1.4);
-
-    // الذيل
-    const pts=[[0,-1.2,-0.2], [0,-1.5,-0.5], [0,-1.2,-0.8], [0,-0.9,-0.6], [0,-1.0,-0.4]].map(p=>new T.Vector3(...p));
-    g.add(new T.Mesh(new T.TubeGeometry(new T.CatmullRomCurve3(pts), 12, .04, 5), mat(c)));
-    
-    hit(g,'monkey',1.0,-0.8); g.scale.setScalar(1.3); scene.add(g);
-    return {g, h};
+    const g=new T.Group(),c=0x7b4a26,f=0xf0cf9f,pk=0xf5b5a0;
+    limb(g,[.24,-.62,0],[.24,0,0],.065,.06,c);S(g,.08,f,.24,.02,0);   // اليد الممسكة بالغصن
+    const wave=new T.Group();wave.position.set(-.24,-.62,0);g.add(wave);
+    limb(wave,[0,0,0],[-.32,.28,.12],.065,.06,c);S(wave,.08,f,-.34,.3,.13);   // اليد الملوّحة
+    S(g,.3,c,0,-.88,0,.85,1.15,.78);                        // الجسم
+    S(g,.21,f,0,-.9,.13,.78,1.05,.6);                       // البطن
+    const h=new T.Group();h.position.set(0,-.42,.04);g.add(h);
+    S(h,.25,c,0,0,0);
+    S(h,.2,f,0,-.04,.14,1.08,.95,.7);                       // الوجه
+    S(h,.1,f,0,.06,.19,1.6,.7,.6);
+    mkEye(h,-.075,.06,.27,.045);mkEye(h,.075,.06,.27,.045);
+    S(h,.018,0x3a1c0c,-.025,-.04,.3);S(h,.018,0x3a1c0c,.025,-.04,.3);
+    mkMouth(h,0,-.1,.28,.055,0x3a160c,false);
+    cheek(h,-.13,-.06,.22,.04);cheek(h,.13,-.06,.22,.04);
+    [-1,1].forEach(s=>{S(h,.1,c,s*.27,.02,0);S(h,.06,pk,s*.29,.02,.04,1,1,.5)});
+    [-1,1].forEach(s=>{limb(g,[s*.13,-1.18,.02],[s*.2,-1.56,.14],.075,.065,c);S(g,.08,f,s*.21,-1.6,.18,1,.7,1.3)});
+    tube(g,[[0,-1.1,-.2],[-.05,-1.4,-.38],[-.25,-1.6,-.45],[-.42,-1.48,-.42],[-.38,-1.3,-.36],[-.26,-1.34,-.32]],.04,c);
+    hit(g,'monkey',1.0,-.8);g.scale.setScalar(1.35);scene.add(g);
+    return{g,h,wave};
 }
-
-// 4. نقار الخشب (على الشجرة)
+// 4. نقار الخشب
 function mkWood(){
-    const g=new T.Group();
-    S(g,.16,0x111111,0,0,0,1,1.3,1); // جسم دائري ممتلئ ولطيف
-    S(g,.14,0xfafafa,0,-.03,.06,.9,1.2,.9); // بطن أبيض
-    const h=new T.Group(); h.position.set(0,.22,.05); g.add(h);
-    S(h,.12,0x111111,0,0,0); // الرأس
-    S(h,.08,0xd7261e,0,.08,-.06,1,.8,1.3); // العرف الأحمر الخلفي
-    const bk=new T.Mesh(new T.ConeGeometry(.02,.12,6),mat(0xaaaaaa)); // منقار أصغر ولطيف
-    bk.rotation.x=Math.PI/2; bk.position.set(0,0,.14); h.add(bk);
-    const b2=new T.Mesh(new T.ConeGeometry(.016,.1,6),mat(0x777777));b2.rotation.x=Math.PI/2;b2.position.set(0,-.022,.13);h.add(b2);B(h,.035,.006,.12,0x222222,0,-.008,.135);
-    mkEye(h, -0.06, 0.02, 0.1, 0.02); mkEye(h, 0.06, 0.02, 0.1, 0.02); // أعين لطيفة
-    
-    const tl=B(g,.06,.25,.02,0x111111,0,-.2,-.1); tl.rotation.x=-.4; // الذيل
-    
-    // أقدام تمسك بالشجرة
-    B(g,.02,.02,.08,0xaaaaaa,-.06,-.1,.15); B(g,.02,.02,.08,0xaaaaaa,.06,-.1,.15);
-
-    hit(g,'wood',.5,.05); g.scale.setScalar(1.6); scene.add(g);
-    return {g, h};
+    const g=new T.Group(),bk=0x1c1c22,wh=0xfafafa,rd=0xe3262b;
+    S(g,.16,bk,0,0,0,1,1.4,.9);                             // الجسم
+    S(g,.125,wh,0,-.03,.07,.85,1.25,.7);                    // البطن
+    [-1,1].forEach(s=>{S(g,.1,bk,s*.12,.02,-.02,.45,1.25,1);for(let i=0;i<3;i++)S(g,.022,wh,s*.165,.08-i*.07,-.02)});
+    const h=new T.Group();h.position.set(0,.25,.03);g.add(h);
+    S(h,.115,bk,0,0,0);
+    [-1,1].forEach(s=>S(h,.05,wh,s*.075,-.03,.05,.7,.55,1));  // خط أبيض على الوجه
+    S(h,.07,rd,0,.075,-.045,1,.85,1.35);                    // العرف الأحمر
+    const bkk=new T.Mesh(new T.ConeGeometry(.026,.17,8),tm(0x9a9a9a));bkk.rotation.x=Math.PI/2;bkk.position.set(0,-.005,.18);h.add(bkk);
+    mkEye(h,-.055,.03,.085,.026);mkEye(h,.055,.03,.085,.026);
+    const tl=B(g,.07,.28,.025,bk,0,-.25,-.09);tl.rotation.x=-.35;
+    [-1,1].forEach(s=>B(g,.02,.02,.08,0x8a8a8a,s*.06,-.18,.14));
+    hit(g,'wood',.5,.05);g.scale.setScalar(1.9);scene.add(g);
+    return{g,h};
 }
-
 function faceOut(T0){const l=Math.hypot(T0[0],T0[1]);return{dx:-T0[0]/l,dz:-T0[1]/l,ang:Math.atan2(-T0[0]/l,-T0[1]/l)}}
-const lion=mkLion(), bear=mkBear(), monkey=mkMonkey(), wood=mkWood();
+const lion=mkLion(),bear=mkBear(),monkey=mkMonkey(),wood=mkWood();
 
-// وضع نقار الخشب
-{
-    const f=faceOut(WT),dist=.8*1.1+.1,r=.8*1.12;
-    wood.g.position.set(WT[0]+f.dx*dist, 2.6, WT[1]+f.dz*dist);
-    wood.g.rotation.y = f.ang+Math.PI*.72;
-}
-
-// وضع القرد (يتدلى من غصن أضفناه خصيصاً)
-{
-    const f=faceOut(MT), bgp=new T.Group(); bgp.position.set(MT[0], 3.5, MT[1]); bgp.rotation.y=f.ang;
-    // إضافة غصن يخرج من الشجرة
-    const branch = new T.Mesh(new T.CylinderGeometry(.12, .18, 3.5, 6), barkM);
-    branch.rotation.x = Math.PI/2; branch.position.z = 1.7; bgp.add(branch);
+// نقار الخشب يتشبث بالجذع بزاوية تُظهر جانبه
+{const f=faceOut(WT),dist=1.12;wood.g.position.set(WT[0]+f.dx*dist,2.6,WT[1]+f.dz*dist);wood.g.rotation.y=f.ang+Math.PI+1.05}
+// القرد يتدلى من غصن
+{const f=faceOut(MT),bgp=new T.Group();bgp.position.set(MT[0],3.6,MT[1]);bgp.rotation.y=f.ang;
+    const branch=new T.Mesh(new T.CylinderGeometry(.11,.2,3.4,8),barkM);branch.rotation.x=Math.PI/2;branch.position.z=1.75;bgp.add(branch);
+    const lm=new T.MeshLambertMaterial({color:0x5aa845});[[0,.25,3.3,.55],[.3,.1,2.9,.4],[-.3,.2,3.0,.42]].forEach(([x,y,z,r])=>{const b=new T.Mesh(blobG,lm);b.position.set(x,y,z);b.scale.setScalar(r);bgp.add(b)});
     scene.add(bgp);
-    
-    // وضع القرد على الغصن بحيث يتدلى منه
-    monkey.g.position.set(MT[0]+f.dx*1.7, 3.5, MT[1]+f.dz*1.7);
-    monkey.g.rotation.y = f.ang;
-}
+    monkey.g.position.set(MT[0]+f.dx*1.75,3.6-.12,MT[1]+f.dz*1.75);monkey.g.rotation.y=f.ang}
+lion.g.position.set(LC[0],0,LC[1]);lion.g.rotation.y=Math.atan2(-LC[0],-LC[1]);
+bear.g.position.set(BC[0],0,BC[1]);bear.g.rotation.y=Math.atan2(-BC[0],-BC[1]);
 
-// وضع الأسد (في مكان ثابت واضح)
-lion.g.position.set(LC[0], 0, LC[1]);
-lion.g.rotation.y = Math.atan2(-LC[0], -LC[1]); // ينظر لوسط الغابة
-
-// وضع الدب (في مكان ثابت واضح)
-bear.g.position.set(BC[0], 0, BC[1]);
-bear.g.rotation.y = Math.atan2(-BC[0], -BC[1]);
+/* علامات ؟ فوق الحيوانات غير المكتشفة */
+const mkTex=()=>{const c=document.createElement('canvas');c.width=c.height=128;const g2=c.getContext('2d');
+    g2.fillStyle='#ffd54a';g2.strokeStyle='#ffffff';g2.lineWidth=10;g2.beginPath();g2.arc(64,64,52,0,7);g2.fill();g2.stroke();
+    g2.fillStyle='#4a3200';g2.font='bold 84px Tajawal, Arial, sans-serif';g2.textAlign='center';g2.textBaseline='middle';g2.fillText('؟',64,70);return new T.CanvasTexture(c)};
+const qTex=mkTex(),MARK={};
+const markY={lion:3.35,bear:3.25,monkey:1.2,wood:1.3};
+for(const k of ['lion','bear','monkey','wood']){const s=new T.Sprite(new T.SpriteMaterial({map:qTex,transparent:true,depthWrite:false}));s.scale.setScalar(.75);scene.add(s);MARK[k]=s}
+const OBJ0={lion:lion.g,bear:bear.g,monkey:monkey.g,wood:wood.g};
+function placeMarks(t){for(const k in MARK){const o=OBJ0[k].position;MARK[k].position.set(o.x,(k==='monkey'||k==='wood'?o.y:0)+markY[k]+Math.sin(t*2.4+o.x)*.12,o.z);MARK[k].visible=!found.has(k)}}
 
 let gyro=false,a0=null,dev={a:0,b:0,g:0},yaw=0,pitch=0;
 const rad=x=>x*Math.PI/180,q0=new T.Quaternion(),q1=new T.Quaternion(-Math.sqrt(.5),0,0,Math.sqrt(.5)),qy=new T.Quaternion(),eu=new T.Euler(),ZZ=new T.Vector3(0,0,1),YY=new T.Vector3(0,1,0);
@@ -438,20 +437,16 @@ function discover(k){
 }
 
 function animate(dt,t){
-    // الفراشات
     bf.forEach(b=>{const x=b.c[0]+Math.sin(t*b.s+b.p)*b.r,y=b.c[1]+Math.sin(t*b.s*1.7+b.p)*.5,z=b.c[2]+Math.cos(t*b.s*.8+b.p)*b.r;b.g.lookAt(x,y,z);b.g.position.set(x,y,z);const f=Math.sin(t*20+b.p)*.9;b.a.rotation.z=f;b.b.rotation.z=-f});
-    
-    // حركة خفيفة تنفسية للحيوانات الثابتة
-    lion.mane.rotation.x = Math.sin(t*2.5)*0.03 - 0.1; // تنفس الأسد
-    bear.g.position.y = Math.sin(t*2)*0.02; // حركة بسيطة للدب
-    
-    // القرد يتأرجح قليلا على الغصن
-    monkey.g.rotation.x = Math.sin(t * 1.5) * 0.05;
-    monkey.h.rotation.y = Math.sin(t * 0.9) * 0.15;
-    
+    // الأسد: يتنفس ويحرك ذيله ورأسه
+    lion.head.rotation.y=Math.sin(t*.7)*.25;lion.head.position.y=1.55+Math.sin(t*2.2)*.015;lion.tail.rotation.z=Math.sin(t*2.6)*.45;
+    // الدب: يهز رأسه بلطف
+    bear.head.rotation.z=Math.sin(t*1.1)*.12;bear.head.rotation.y=Math.sin(t*.6)*.2;bear.g.position.y=Math.abs(Math.sin(t*1.5))*.02;
+    // القرد يتأرجح ويلوّح
+    monkey.g.rotation.x=Math.sin(t*1.5)*.07;monkey.g.rotation.z=Math.sin(t*1.1)*.05;monkey.h.rotation.y=Math.sin(t*.9)*.25;monkey.wave.rotation.z=Math.sin(t*6)*.35;
     // نقار الخشب ينقر
-    const pk=Math.sin(t*1.3)>.2?Math.max(0,Math.sin(t*22)):0;
-    wood.h.position.z=.03+pk*.05; wood.h.rotation.x=pk*.35;
+    const pk=Math.sin(t*1.3)>.2?Math.max(0,Math.sin(t*22)):0;wood.h.position.z=.03+pk*.05;wood.h.rotation.x=pk*.35;
+    placeMarks(t);
 }
 
 function resize(){renderer.setSize(innerWidth,innerHeight)} addEventListener('resize',resize);resize();
@@ -554,24 +549,22 @@ if(v){try{const el=document.documentElement;(el.requestFullscreen||el.webkitRequ
 async function begin(v){
     try{if(typeof DeviceOrientationEvent!=='undefined'&&typeof DeviceOrientationEvent.requestPermission==='function')await DeviceOrientationEvent.requestPermission()}catch(e){}
     if(!AC)initAudio(); AC.resume(); a0=null; yaw=0; started=true; $('#intro').style.display='none'; setVR(v); setHint();
-    
-    // إرشادات البداية تظهر كصوت ونص
     setTimeout(()=>{
-        say('أهلاً بك في الغابة! اضغط على الشاشة للمشي، واضغط للتوقف. ابحث عن الحيوانات الأربعة وتأملها.', true, ()=>{});
-    }, 1000);
+        say('أهلاً بك في الغابة! اضغط على الشاشة للمشي، واضغط مرة أخرى للتوقف. ابحث عن الحيوانات الأربعة، وثبّت الدائرة عليها لتسمع قصتها.', true, ()=>{});
+    }, 900);
 }
 
-$('#go').onclick=()=>begin(false); $('#goVR').onclick=()=>begin(true);
+$('#go').onclick=()=>{unlockSpeech();begin(false)}; $('#goVR').onclick=()=>{unlockSpeech();begin(true)};
 $('#bVR').onclick=()=>setVR(!vr);
-
-$('#bSnd').onclick=e=>{muted=!muted; e.currentTarget.textContent=muted?'🔇':'🔊'; if(master)master.gain.value=muted?0:.55; if(muted&&'speechSynthesis'in window)speechSynthesis.cancel()};
-$('#bRe').onclick=()=>{if(lastNote){setNote(lastNote); say(lastNote.t, false, ()=>{noteTimer=setTimeout(hideNote,5000)})}};
+$('#bVoice').onclick=()=>{unlockSpeech();nextVoice()};
+$('#bSnd').onclick=e=>{muted=!muted; e.currentTarget.textContent=muted?'🔇':'🔊'; if(master)master.gain.value=muted?0:.55; if(muted&&synth)synth.cancel()};
+$('#bRe').onclick=()=>{if(lastNote){unlockSpeech();setNote(lastNote); say(lastNote.t, false, ()=>{noteTimer=setTimeout(hideNote,5000)})}};
 $('#bFs').onclick=()=>{const el=document.documentElement;try{document.fullscreenElement?document.exitFullscreen():(el.requestFullscreen||el.webkitRequestFullscreen).call(el)}catch(e){}};
 $('#bRst').onclick=()=>{
     found.clear(); $$('.stars .n').forEach(e=>e.textContent=0);
     $$('.c').forEach(e=>e.classList.remove('on'));
     hideNote(); $$('.subtitle').forEach(s=>s.classList.remove('on'));
-    if(window.speechSynthesis) speechSynthesis.cancel();
+    if(synth) synth.cancel();
     pos.set(0, 1.6, 0); yaw = 0; pitch = 0; walking = false; setHint();
 };
 </script>
